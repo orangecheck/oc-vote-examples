@@ -1,0 +1,121 @@
+name: 'OC Vote Gate'
+description: 'Gate a job on an OC Vote poll tally (https://vote.ochk.io)'
+author: 'OrangeCheck'
+branding:
+    icon: 'check-circle'
+    color: 'orange'
+
+inputs:
+    poll-id:
+        description: '64-hex OC Vote poll id'
+        required: true
+    pass-condition:
+        description: 'jq expression over the /api/tally response; must be truthy'
+        required: false
+        default: '.tallies.yes > .tallies.no'
+    min-voters:
+        description: 'reject if turnout.voters is below this'
+        required: false
+        default: '0'
+    require-closed:
+        description: "if 'true', reject while the poll is still open"
+        required: false
+        default: 'false'
+    awaiting-reveal-is:
+        description: "'fail' or 'pass' — how to treat secret-mode polls pre-reveal"
+        required: false
+        default: 'fail'
+    tally-base-url:
+        description: 'override /api/tally base URL'
+        required: false
+        default: 'https://vote.ochk.io/api/tally'
+
+outputs:
+    state:
+        description: 'tallied or awaiting_reveal'
+        value: ${{ steps.gate.outputs.state }}
+    passed:
+        description: 'true or false'
+        value: ${{ steps.gate.outputs.passed }}
+    tally-json:
+        description: 'full JSON response'
+        value: ${{ steps.gate.outputs.tally-json }}
+
+runs:
+    using: 'composite'
+    steps:
+        - id: gate
+          shell: bash
+          env:
+              POLL_ID: ${{ inputs.poll-id }}
+              PASS_COND: ${{ inputs.pass-condition }}
+              MIN_VOTERS: ${{ inputs.min-voters }}
+              REQUIRE_CLOSED: ${{ inputs.require-closed }}
+              AWAITING_REVEAL_IS: ${{ inputs.awaiting-reveal-is }}
+              BASE: ${{ inputs.tally-base-url }}
+          run: |
+              set -euo pipefail
+
+              if ! [[ "$POLL_ID" =~ ^[0-9a-f]{64}$ ]]; then
+                  echo "::error::poll-id must be 64 hex chars (got: $POLL_ID)"
+                  exit 1
+              fi
+
+              tally=$(curl -sSf "$BASE?poll=$POLL_ID")
+              echo "::group::tally response"
+              echo "$tally" | jq .
+              echo "::endgroup::"
+
+              state=$(jq -r '.state' <<< "$tally")
+              echo "state=$state" >> "$GITHUB_OUTPUT"
+              { echo "tally-json<<END_TALLY"; echo "$tally"; echo "END_TALLY"; } >> "$GITHUB_OUTPUT"
+
+              if [[ "$state" == "awaiting_reveal" ]]; then
+                  case "$AWAITING_REVEAL_IS" in
+                      pass)
+                          echo "awaiting_reveal → treated as pass"
+                          echo "passed=true" >> "$GITHUB_OUTPUT"
+                          exit 0
+                          ;;
+                      *)
+                          echo "::error::poll is awaiting_reveal — treated as fail (set awaiting-reveal-is: pass to allow)"
+                          echo "passed=false" >> "$GITHUB_OUTPUT"
+                          exit 1
+                          ;;
+                  esac
+              fi
+
+              if [[ "$state" != "tallied" ]]; then
+                  echo "::error::unexpected state: $state"
+                  echo "passed=false" >> "$GITHUB_OUTPUT"
+                  exit 1
+              fi
+
+              if [[ "$REQUIRE_CLOSED" == "true" ]]; then
+                  deadline=$(jq -r '.deadline // empty' <<< "$tally")
+                  if [[ -n "$deadline" ]]; then
+                      now_epoch=$(date +%s)
+                      deadline_epoch=$(date -u -d "$deadline" +%s 2>/dev/null || date -j -f '%Y-%m-%dT%H:%M:%SZ' "$deadline" +%s 2>/dev/null || echo 0)
+                      if [[ "$deadline_epoch" -gt "$now_epoch" ]]; then
+                          echo "::error::require-closed=true but deadline $deadline is in the future"
+                          echo "passed=false" >> "$GITHUB_OUTPUT"
+                          exit 1
+                      fi
+                  fi
+              fi
+
+              voters=$(jq -r '.turnout.voters // 0' <<< "$tally")
+              if [[ "$voters" -lt "$MIN_VOTERS" ]]; then
+                  echo "::error::only $voters voter(s) — min-voters is $MIN_VOTERS"
+                  echo "passed=false" >> "$GITHUB_OUTPUT"
+                  exit 1
+              fi
+
+              if ! jq -e "$PASS_COND" <<< "$tally" > /dev/null; then
+                  echo "::error::pass-condition ($PASS_COND) evaluated false"
+                  echo "passed=false" >> "$GITHUB_OUTPUT"
+                  exit 1
+              fi
+
+              echo "passed=true" >> "$GITHUB_OUTPUT"
+              echo "✓ poll $POLL_ID passed"
