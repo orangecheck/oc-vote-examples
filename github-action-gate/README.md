@@ -28,9 +28,8 @@ jobs:
                   pass-condition: '.tallies.yes > .tallies.no'
                   # optional: require at least N voters
                   min-voters: 5
-                  # optional: pass only once the poll's deadline has passed. /api/tally
-                  # sends no deadline yet, so 'true' fails every run for now
-                  require-closed: 'false'
+                  # optional: pass only once the poll's deadline has passed
+                  require-closed: 'true'
                   # optional: accept awaiting_reveal as a fail (default) or a pass
                   awaiting-reveal-is: 'fail'
 
@@ -48,7 +47,7 @@ jobs:
 | `poll-id` | yes | — | 64-hex OC Vote poll id |
 | `pass-condition` | no | `.tallies.yes > .tallies.no` | jq expression over the `/api/tally` response; must evaluate truthy to pass |
 | `min-voters` | no | `0` | reject if `turnout.voters` is below this |
-| `require-closed` | no | `'false'` | if `'true'`, pass only when the answer's `deadline` is an ISO 8601 UTC time in the past. An answer with no deadline fails, and vote.ochk.io's `/api/tally` sends none yet, so for now `'true'` always fails |
+| `require-closed` | no | `'false'` | if `'true'`, pass only when the answer's `deadline` is an ISO 8601 UTC time in the past. An answer with no deadline, or one that does not read, fails |
 | `awaiting-reveal-is` | no | `'fail'` | one of `'fail'` or `'pass'`; how to treat secret-mode polls pre-reveal |
 | `tally-base-url` | no | `https://vote.ochk.io/api/tally` | override for self-hosted |
 

@@ -18,7 +18,7 @@ inputs:
         required: false
         default: '0'
     require-closed:
-        description: "if 'true', pass only once the answer's deadline has passed; an answer with no deadline fails (vote.ochk.io sends none yet)"
+        description: "if 'true', pass only once the answer's deadline has passed; an answer with no deadline fails"
         required: false
         default: 'false'
     awaiting-reveal-is:

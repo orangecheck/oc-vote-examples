@@ -67,7 +67,8 @@ ANSWERS = {
         200,
         {"state": "provisional", "basis": "anchored", "unanchored": "1\n::warning::x", **COUNT},
     ),
-    # /api/tally sends no deadline yet; these are the answers once it does.
+    # The plain tallied answer above has no deadline, as vote.ochk.io sent before
+    # oc-vote-web 8f135c54; these carry one, as it sends now.
     "closed": (200, {"state": "tallied", "basis": "voter_clocks", **COUNT, "deadline": PAST}),
     "future": (200, {"state": "tallied", "basis": "voter_clocks", **COUNT, "deadline": FUTURE}),
     # GNU date reads a parenthesised comment, newline and all, as a time in the future.
