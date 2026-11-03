@@ -37,22 +37,37 @@ fails=0
 POLL=$(printf 'a%.0s' $(seq 64))
 
 # check NAME CASE WANT_EXIT WANT_TEXT WANT_STATE [ENV=VALUE ...]
-# WANT_STATE is the `state` output, or - for none.
+# WANT_STATE is the `state` output, or - for none. Every case also holds the
+# step to what a server must never be able to do through it: start a workflow
+# command of its own, write an output line of its own, or run a command.
 check() {
     local name=$1 case=$2 want_exit=$3 want_text=$4 want_state=$5
     shift 5
     local out="$work/$name.out" gho="$work/$name.gho"
     : > "$gho"
     local got_exit=0
-    env POLL_ID="$POLL" PASS_COND='.tallies.yes > .tallies.no' MIN_VOTERS=0 \
+    (cd "$work" && env POLL_ID="$POLL" PASS_COND='.tallies.yes > .tallies.no' MIN_VOTERS=0 \
         REQUIRE_CLOSED=false AWAITING_REVEAL_IS=fail \
         BASE="http://127.0.0.1:$port/$case" GITHUB_OUTPUT="$gho" "$@" \
-        bash "$work/step.sh" > "$out" 2>&1 || got_exit=$?
+        bash "$work/step.sh") > "$out" 2>&1 || got_exit=$?
     local got_state
     got_state=$(sed -n 's/^state=//p' "$gho")
-    if [[ "$got_exit" != "$want_exit" ]] || ! grep -qF -- "$want_text" "$out" \
+    local why=
+    # At most one ::error::, and no command but ::error::, ::group:: and ::endgroup::.
+    if (( $(grep -c '^[[:space:]]*::error::' "$out") > 1 )); then why="more than one ::error:: line"; fi
+    if grep -E '^[[:space:]]*::' "$out" | grep -qvE '^[[:space:]]*::(error|group|endgroup)::'; then
+        why="a workflow command the step does not write"
+    fi
+    # Only the three outputs, each at most once.
+    if grep -qvE '^(state|tally-json|passed)=' "$gho" \
+        || (( $(cut -d= -f1 "$gho" | sort | uniq -d | wc -l) > 0 )); then
+        why="an output line the step does not write"
+    fi
+    if [[ -e "$work/gate-pwned" ]]; then why="a server string ran as a command"; fi
+    if [[ -n "$why" || "$got_exit" != "$want_exit" ]] || ! grep -qF -- "$want_text" "$out" \
         || [[ "${got_state:--}" != "$want_state" ]]; then
-        echo "FAIL $name: exit $got_exit (want $want_exit), state '${got_state:--}' (want '$want_state')"
+        echo "FAIL $name: exit $got_exit (want $want_exit), state '${got_state:--}' (want '$want_state')${why:+, $why}"
+        sed 's/^/  o /' "$gho"
         echo "  want text: $want_text"
         sed 's/^/  | /' "$out"
         fails=$((fails + 1))
@@ -75,6 +90,11 @@ check too-many too_many 1 "run this job again in 42 seconds." -
 check event-id event_id 1 "set poll-id to $(printf 'b%.0s' $(seq 64))." -
 check failed failed 1 "::error::/api/tally answered 500 (tally_failed). The tally failed on the server: run this job again." -
 check not-json not_json 1 "answered 502 with a body that is not JSON" -
+check inject-words inject_words 1 "boom%0A::add-mask::s3cret%0D%0A::stop-commands::tok 100%25" -
+check inject-not-json not_json_inject 1 "oops%0A::add-mask::s3cret" -
+check inject-output inject_output 1 "::error::pass-condition" tallied
+check inject-state inject_state 1 "answered a state that is not one word: tallied%0Apassed=true" -
+check inject-voters inject_voters 1 "a voter count that is not a whole number: PATH[\$(touch gate-pwned)]" tallied MIN_VOTERS=1
 # Nothing listens on port 9 (discard) here; curl gets no answer.
 check unreachable tallied 1 "::error::could not reach" - BASE=http://127.0.0.1:9/x
 

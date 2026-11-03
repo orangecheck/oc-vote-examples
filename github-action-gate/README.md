@@ -22,7 +22,8 @@ jobs:
             - name: Require OC Vote approval
               uses: orangecheck/oc-vote-examples/github-action-gate@main
               with:
-                  poll-id: 3054390f047f2703186943a41178bc15931500b5139229517f26e56282026ee5
+                  # the id of a poll you made for this decision
+                  poll-id: <64-hex poll id from vote.ochk.io>
                   # "yes beats no" — customize with any jq expression against the tally result
                   pass-condition: '.tallies.yes > .tallies.no'
                   # optional: require at least N voters
@@ -56,7 +57,7 @@ jobs:
 |---|---|
 | `state` | The `state` of a 200 answer: `tallied`, `awaiting_reveal` or `provisional`. Not set when `/api/tally` answers anything else |
 | `passed` | `'true'` / `'false'` |
-| `tally-json` | Full JSON response from `/api/tally` |
+| `tally-json` | Full JSON response from `/api/tally`, written on one line |
 
 ### How each answer ends
 
@@ -74,6 +75,8 @@ jobs:
 | 400 or 500 | Fails the same way, with the server's words or code |
 | No answer, or a body that is not JSON | Fails, saying so |
 
+Text from the server is escaped (`%`, CR and LF, as the Actions toolkit does) before it reaches a workflow command, so an answer can never write a command or an output of its own. Only a one-word `state` is written as an output, and a count is compared only once it is a whole number.
+
 `bash github-action-gate/test/run.sh` runs the step against a stand-in `/api/tally` for each of these answers; CI runs it on every push.
 
 ## Verification story
@@ -88,7 +91,7 @@ independent-verify:
               npx -y @orangecheck/vote-cli tally $POLL_ID --json > tally.json
               jq -e '.tallies.yes > .tallies.no' tally.json
           env:
-              POLL_ID: 3054…
+              POLL_ID: <64-hex poll id from vote.ochk.io>
 ```
 
 Two independent implementations agreeing on a tally is the protocol's claim. If the two disagree, the CLI is authoritative and the web page has a bug — file an issue.
@@ -106,5 +109,5 @@ If you don't want the action overhead, drop the logic directly in a step:
       echo "state=$state  passed=$passed"
       [[ "$state" == "tallied" && "$passed" == "true" ]] || exit 1
   env:
-      POLL_ID: 3054…
+      POLL_ID: <64-hex poll id from vote.ochk.io>
 ```

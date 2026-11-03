@@ -56,9 +56,27 @@ runs:
           run: |
               set -euo pipefail
 
-              if ! [[ "$POLL_ID" =~ ^[0-9a-f]{64}$ ]]; then
-                  echo "::error::poll-id must be 64 hex chars (got: $POLL_ID)"
+              # Text from the server goes into workflow commands, so it is escaped the
+              # way the Actions toolkit escapes command data: % CR LF. A server word can
+              # then never start a line of its own, such as ::add-mask:: or a second
+              # ::error::.
+              esc() {
+                  local s=$1
+                  s=${s//'%'/'%25'}
+                  s=${s//$'\r'/'%0D'}
+                  s=${s//$'\n'/'%0A'}
+                  printf '%s' "$s"
+              }
+              fail() {
+                  echo "::error::$(esc "$1")"
                   exit 1
+              }
+
+              if ! [[ "$POLL_ID" =~ ^[0-9a-f]{64}$ ]]; then
+                  fail "poll-id must be 64 hex chars (got: $POLL_ID)"
+              fi
+              if ! [[ "$MIN_VOTERS" =~ ^[0-9]+$ ]]; then
+                  fail "min-voters must be a whole number (got: $MIN_VOTERS)"
               fi
 
               # Read the status and the body ourselves: curl -f would turn a 409,
@@ -67,15 +85,14 @@ runs:
               head_file=$(mktemp)
               trap 'rm -f "$body_file" "$head_file"' EXIT
               if ! status=$(curl -sS -o "$body_file" -D "$head_file" -w '%{http_code}' "$BASE?poll=$POLL_ID"); then
-                  echo "::error::could not reach $BASE: no answer, nothing was read. Run this job again."
-                  exit 1
+                  fail "could not reach $BASE: no answer, nothing was read. Run this job again."
               fi
               tally=$(cat "$body_file")
               # A body that is not JSON (a proxy's error page) is shown as text.
               if ! jq -e . <<< "$tally" > /dev/null 2>&1; then
-                  echo "::error::/api/tally answered $status with a body that is not JSON: ${tally:0:200}"
-                  exit 1
+                  fail "/api/tally answered $status with a body that is not JSON: ${tally:0:200}"
               fi
+              # jq prints every string quoted and escaped, so no line of this starts a command.
               echo "::group::tally response ($status)"
               echo "$tally" | jq .
               echo "::endgroup::"
@@ -89,10 +106,11 @@ runs:
                       503) next="A relay or chain read did not finish, so nothing was counted: run this job again." ;;
                       429)
                           wait_s=$(awk 'tolower($1) == "retry-after:" { print $2 }' "$head_file" | tr -d '\r')
-                          next="Too many tallies asked: run this job again in ${wait_s:-60} seconds." ;;
+                          [[ "$wait_s" =~ ^[0-9]+$ ]] || wait_s=60
+                          next="Too many tallies asked: run this job again in $wait_s seconds." ;;
                       404)
                           poll_of_event=$(jq -r '.poll_id // empty' <<< "$tally")
-                          if [[ -n "$poll_of_event" ]]; then
+                          if [[ "$poll_of_event" =~ ^[0-9a-f]{64}$ ]]; then
                               next="That id is a poll's Nostr event: set poll-id to $poll_of_event."
                           else
                               next="Check poll-id."
@@ -101,13 +119,18 @@ runs:
                       500) next="The tally failed on the server: run this job again." ;;
                       *) next="" ;;
                   esac
-                  echo "::error::/api/tally answered $status${code:+ ($code)}${words:+: $words}. $next"
-                  exit 1
+                  fail "/api/tally answered $status${code:+ ($code)}${words:+: $words}. $next"
               fi
 
+              # Only a state that is one word is written as an output: a newline in it
+              # would add a line of its own to $GITHUB_OUTPUT.
               state=$(jq -r '.state' <<< "$tally")
+              if ! [[ "$state" =~ ^[a-z_]+$ ]]; then
+                  fail "/api/tally answered a state that is not one word: $state"
+              fi
               echo "state=$state" >> "$GITHUB_OUTPUT"
-              { echo "tally-json<<END_TALLY"; echo "$tally"; echo "END_TALLY"; } >> "$GITHUB_OUTPUT"
+              # Re-written by jq on one line, so the body can carry no newline into the file.
+              echo "tally-json=$(jq -c . <<< "$tally")" >> "$GITHUB_OUTPUT"
 
               if [[ "$state" == "awaiting_reveal" ]]; then
                   case "$AWAITING_REVEAL_IS" in
@@ -117,25 +140,22 @@ runs:
                           exit 0
                           ;;
                       *)
-                          echo "::error::poll is awaiting_reveal — treated as fail (set awaiting-reveal-is: pass to allow)"
                           echo "passed=false" >> "$GITHUB_OUTPUT"
-                          exit 1
+                          fail "poll is awaiting_reveal — treated as fail (set awaiting-reveal-is: pass to allow)"
                           ;;
                   esac
               fi
 
               if [[ "$state" == "provisional" ]]; then
-                  unanchored=$(jq -r '.unanchored // empty' <<< "$tally")
+                  unanchored=$(jq -r '.unanchored | numbers' <<< "$tally")
                   because=$(jq -r '.not_final_because // empty' <<< "$tally")
-                  echo "::error::poll is provisional: an anchored poll's count is not final until the chain is 6 blocks past its close (plus the grace), so the counts may still change${unanchored:+; $unanchored counted ballot(s) have no anchor yet}${because:+; not final because: $because}. Run this job again later."
                   echo "passed=false" >> "$GITHUB_OUTPUT"
-                  exit 1
+                  fail "poll is provisional: an anchored poll's count is not final until the chain is 6 blocks past its close (plus the grace), so the counts may still change${unanchored:+; $unanchored counted ballot(s) have no anchor yet}${because:+; not final because: $because}. Run this job again later."
               fi
 
               if [[ "$state" != "tallied" ]]; then
-                  echo "::error::/api/tally answered state $state, which this action does not pass"
                   echo "passed=false" >> "$GITHUB_OUTPUT"
-                  exit 1
+                  fail "/api/tally answered state $state, which this action does not pass"
               fi
 
               if [[ "$REQUIRE_CLOSED" == "true" ]]; then
@@ -144,24 +164,27 @@ runs:
                       now_epoch=$(date +%s)
                       deadline_epoch=$(date -u -d "$deadline" +%s 2>/dev/null || date -j -f '%Y-%m-%dT%H:%M:%SZ' "$deadline" +%s 2>/dev/null || echo 0)
                       if [[ "$deadline_epoch" -gt "$now_epoch" ]]; then
-                          echo "::error::require-closed=true but deadline $deadline is in the future"
                           echo "passed=false" >> "$GITHUB_OUTPUT"
-                          exit 1
+                          fail "require-closed=true but deadline $deadline is in the future"
                       fi
                   fi
               fi
 
+              # A count from the server is compared only once it is a whole number: bash
+              # evaluates the operands of -lt, and a string like a[$(...)] would run.
               voters=$(jq -r '.turnout.voters // 0' <<< "$tally")
-              if [[ "$voters" -lt "$MIN_VOTERS" ]]; then
-                  echo "::error::only $voters voter(s) — min-voters is $MIN_VOTERS"
+              if ! [[ "$voters" =~ ^[0-9]+$ ]]; then
                   echo "passed=false" >> "$GITHUB_OUTPUT"
-                  exit 1
+                  fail "/api/tally answered a voter count that is not a whole number: $voters"
+              fi
+              if (( 10#$voters < 10#$MIN_VOTERS )); then
+                  echo "passed=false" >> "$GITHUB_OUTPUT"
+                  fail "only $voters voter(s) — min-voters is $MIN_VOTERS"
               fi
 
               if ! jq -e "$PASS_COND" <<< "$tally" > /dev/null; then
-                  echo "::error::pass-condition ($PASS_COND) evaluated false"
                   echo "passed=false" >> "$GITHUB_OUTPUT"
-                  exit 1
+                  fail "pass-condition ($PASS_COND) evaluated false"
               fi
 
               echo "passed=true" >> "$GITHUB_OUTPUT"
