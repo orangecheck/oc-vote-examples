@@ -103,7 +103,8 @@ check inject-voters inject_voters 1 "a voter count that is not a whole number: P
 check voters-named voters_named 1 "a voter count that is not a whole number: MIN_VOTERS" tallied MIN_VOTERS=5
 check inject-poll-id inject_poll_id 1 "answered 404: this is the Nostr event id of a poll. Check poll-id." -
 check inject-unanchored inject_unanchored 1 "so the counts may still change. Run this job again later." provisional
-check closed-past tallied 0 "passed" tallied REQUIRE_CLOSED=true
+check closed-no-deadline tallied 1 "::error::require-closed=true but /api/tally sent no deadline" tallied REQUIRE_CLOSED=true
+check closed-past closed 0 "passed" tallied REQUIRE_CLOSED=true
 check closed-future future 1 "::error::require-closed=true but deadline 2999-01-01T00:00:00Z is in the future" tallied REQUIRE_CLOSED=true
 check closed-unread-deadline deadline_unread 1 "::error::require-closed=true but the deadline could not be read: soon" tallied REQUIRE_CLOSED=true
 check unknown-state unread 1 "::error::/api/tally answered state unread, which this action does not know" -

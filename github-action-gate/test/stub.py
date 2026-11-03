@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PAST = "2026-01-01T00:00:00Z"
 FUTURE = "2999-01-01T00:00:00Z"
-COUNT = {"turnout": {"voters": 4, "weight": 4}, "tallies": {"yes": 3, "no": 1}, "deadline": PAST}
+COUNT = {"turnout": {"voters": 4, "weight": 4}, "tallies": {"yes": 3, "no": 1}}
 
 # Each answer as /api/tally sends it (oc-vote-web src/pages/api/tally.ts).
 ANSWERS = {
@@ -67,6 +67,8 @@ ANSWERS = {
         200,
         {"state": "provisional", "basis": "anchored", "unanchored": "1\n::warning::x", **COUNT},
     ),
+    # /api/tally sends no deadline yet; these are the answers once it does.
+    "closed": (200, {"state": "tallied", "basis": "voter_clocks", **COUNT, "deadline": PAST}),
     "future": (200, {"state": "tallied", "basis": "voter_clocks", **COUNT, "deadline": FUTURE}),
     # GNU date reads a parenthesised comment, newline and all, as a time in the future.
     "deadline_unread": (200, {"state": "tallied", **COUNT, "deadline": "soon"}),
