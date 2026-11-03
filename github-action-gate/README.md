@@ -64,10 +64,17 @@ jobs:
 |---|---|
 | 200 `tallied` | Applies `require-closed`, `min-voters` and `pass-condition`; passes only if all hold |
 | 200 `awaiting_reveal` (secret poll, no reveal yet) | Passes or fails as `awaiting-reveal-is` says |
-| 200 `provisional` (anchored poll, not final yet) | Fails: "unexpected state: provisional" |
-| 409 `deferred` (snapshot block not buried yet) | Fails at the `curl` call, with no `state` or `passed` output; run it again later |
-| 503 (the relays or the chain not read in full, such as the block at the deadline; no `state`, no count) | Fails at the `curl` call, the same way |
-| 400, 404, 422 (an invalid poll), 429 or 500 | Fails at the `curl` call, the same way |
+| 200 `provisional` (anchored poll, not final yet) | Fails, saying the count is provisional and may still change, and how many counted ballots have no anchor yet; run it again later |
+| 200 with any other `state` | Fails, naming the state |
+| 409 `deferred` (snapshot block not buried yet) | Fails with no `state` or `passed` output. The error names the status, the code (such as `E_SNAPSHOT_UNRESOLVED`) and the reason, and says to run it again later |
+| 503 (the relays or the chain not read in full, such as the block at the deadline; no `state`, no count) | Fails the same way, with the server's words; run it again |
+| 422 (an invalid poll) | Fails the same way, with the server's words; the poll can never pass |
+| 404 | Fails the same way. For a poll's Nostr event id, it names the poll id to use instead |
+| 429 | Fails the same way, saying how many seconds to wait (`Retry-After`) |
+| 400 or 500 | Fails the same way, with the server's words or code |
+| No answer, or a body that is not JSON | Fails, saying so |
+
+`bash github-action-gate/test/run.sh` runs the step against a stand-in `/api/tally` for each of these answers; CI runs it on every push.
 
 ## Verification story
 

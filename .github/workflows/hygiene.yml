@@ -29,3 +29,12 @@ jobs:
                       echo "::error::absolute home-directory path in a tracked file"
                       exit 1
                   fi
+
+    gate-action:
+        # The gate step's own shell, run against a stand-in /api/tally for each
+        # answer the action's README lists, checked for its exit code and message.
+        name: Vote gate action ends each /api/tally answer as documented
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - run: bash github-action-gate/test/run.sh

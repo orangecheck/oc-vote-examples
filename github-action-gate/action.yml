@@ -61,10 +61,49 @@ runs:
                   exit 1
               fi
 
-              tally=$(curl -sSf "$BASE?poll=$POLL_ID")
-              echo "::group::tally response"
+              # Read the status and the body ourselves: curl -f would turn a 409,
+              # a 422 or a 503 into "returned error" and drop what the answer says.
+              body_file=$(mktemp)
+              head_file=$(mktemp)
+              trap 'rm -f "$body_file" "$head_file"' EXIT
+              if ! status=$(curl -sS -o "$body_file" -D "$head_file" -w '%{http_code}' "$BASE?poll=$POLL_ID"); then
+                  echo "::error::could not reach $BASE: no answer, nothing was read. Run this job again."
+                  exit 1
+              fi
+              tally=$(cat "$body_file")
+              # A body that is not JSON (a proxy's error page) is shown as text.
+              if ! jq -e . <<< "$tally" > /dev/null 2>&1; then
+                  echo "::error::/api/tally answered $status with a body that is not JSON: ${tally:0:200}"
+                  exit 1
+              fi
+              echo "::group::tally response ($status)"
               echo "$tally" | jq .
               echo "::endgroup::"
+
+              if [[ "$status" != "200" ]]; then
+                  # A code is snake_case; an error that is a sentence is the words.
+                  code=$(jq -r '.code // .state // (.error | strings | select(test("^[a-z][a-z0-9_]*$"))) // empty' <<< "$tally")
+                  words=$(jq -r '.reason // .detail // (.error | strings | select(test("^[a-z][a-z0-9_]*$") | not)) // empty' <<< "$tally")
+                  case "$status" in
+                      409) next="The tally is deferred, not final yet: run this job again later." ;;
+                      503) next="A relay or chain read did not finish, so nothing was counted: run this job again." ;;
+                      429)
+                          wait_s=$(awk 'tolower($1) == "retry-after:" { print $2 }' "$head_file" | tr -d '\r')
+                          next="Too many tallies asked: run this job again in ${wait_s:-60} seconds." ;;
+                      404)
+                          poll_of_event=$(jq -r '.poll_id // empty' <<< "$tally")
+                          if [[ -n "$poll_of_event" ]]; then
+                              next="That id is a poll's Nostr event: set poll-id to $poll_of_event."
+                          else
+                              next="Check poll-id."
+                          fi ;;
+                      422) next="The poll itself is invalid, so it can never pass." ;;
+                      500) next="The tally failed on the server: run this job again." ;;
+                      *) next="" ;;
+                  esac
+                  echo "::error::/api/tally answered $status${code:+ ($code)}${words:+: $words}. $next"
+                  exit 1
+              fi
 
               state=$(jq -r '.state' <<< "$tally")
               echo "state=$state" >> "$GITHUB_OUTPUT"
@@ -85,8 +124,16 @@ runs:
                   esac
               fi
 
+              if [[ "$state" == "provisional" ]]; then
+                  unanchored=$(jq -r '.unanchored // empty' <<< "$tally")
+                  because=$(jq -r '.not_final_because // empty' <<< "$tally")
+                  echo "::error::poll is provisional: an anchored poll's count is not final until the chain is 6 blocks past its close (plus the grace), so the counts may still change${unanchored:+; $unanchored counted ballot(s) have no anchor yet}${because:+; not final because: $because}. Run this job again later."
+                  echo "passed=false" >> "$GITHUB_OUTPUT"
+                  exit 1
+              fi
+
               if [[ "$state" != "tallied" ]]; then
-                  echo "::error::unexpected state: $state"
+                  echo "::error::/api/tally answered state $state, which this action does not pass"
                   echo "passed=false" >> "$GITHUB_OUTPUT"
                   exit 1
               fi
