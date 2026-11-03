@@ -47,7 +47,7 @@ jobs:
 | `poll-id` | yes | — | 64-hex OC Vote poll id |
 | `pass-condition` | no | `.tallies.yes > .tallies.no` | jq expression over the `/api/tally` response; must evaluate truthy to pass |
 | `min-voters` | no | `0` | reject if `turnout.voters` is below this |
-| `require-closed` | no | `'false'` | if `'true'`, reject while the poll is still open (state must be `tallied` + deadline in the past) |
+| `require-closed` | no | `'false'` | if `'true'`, reject while the poll is still open (state must be `tallied` + deadline in the past; a deadline that is not an ISO 8601 UTC time fails) |
 | `awaiting-reveal-is` | no | `'fail'` | one of `'fail'` or `'pass'`; how to treat secret-mode polls pre-reveal |
 | `tally-base-url` | no | `https://vote.ochk.io/api/tally` | override for self-hosted |
 
@@ -66,7 +66,7 @@ jobs:
 | 200 `tallied` | Applies `require-closed`, `min-voters` and `pass-condition`; passes only if all hold |
 | 200 `awaiting_reveal` (secret poll, no reveal yet) | Passes or fails as `awaiting-reveal-is` says |
 | 200 `provisional` (anchored poll, not final yet) | Fails, saying the count is provisional and may still change, and how many counted ballots have no anchor yet; run it again later |
-| 200 with any other `state` | Fails, naming the state |
+| 200 with any other `state` | Fails, naming the state, with no outputs |
 | 409 `deferred` (snapshot block not buried yet) | Fails with no `state` or `passed` output. The error names the status, the code (such as `E_SNAPSHOT_UNRESOLVED`) and the reason, and says to run it again later |
 | 503 (the relays or the chain not read in full, such as the block at the deadline; no `state`, no count) | Fails the same way, with the server's words; run it again |
 | 422 (an invalid poll) | Fails the same way, with the server's words; the poll can never pass |
@@ -75,7 +75,7 @@ jobs:
 | 400 or 500 | Fails the same way, with the server's words or code |
 | No answer, or a body that is not JSON | Fails, saying so |
 
-Text from the server is escaped (`%`, CR and LF, as the Actions toolkit does) before it reaches a workflow command, so an answer can never write a command or an output of its own. Only a one-word `state` is written as an output, and a count is compared only once it is a whole number.
+Text from the server is escaped (`%`, CR and LF, as the Actions toolkit does) before it reaches a workflow command, so an answer can never write a command or an output of its own. Only a `state` this action knows is written as an output, and a count is compared only once it is a whole number.
 
 `bash github-action-gate/test/run.sh` runs the step against a stand-in `/api/tally` for each of these answers; CI runs it on every push.
 
@@ -103,11 +103,13 @@ If you don't want the action overhead, drop the logic directly in a step:
 ```yaml
 - name: Gate on poll result
   run: |
-      tally=$(curl -sS "https://vote.ochk.io/api/tally?poll=$POLL_ID")
-      state=$(echo "$tally" | jq -r '.state')
-      passed=$(echo "$tally" | jq -e '.tallies.yes > .tallies.no' && echo true || echo false)
-      echo "state=$state  passed=$passed"
-      [[ "$state" == "tallied" && "$passed" == "true" ]] || exit 1
+      tally=$(curl -sSf "https://vote.ochk.io/api/tally?poll=$POLL_ID")
+      # Compared, never printed: a server string echoed raw could start a workflow command.
+      if [[ "$(jq -r '.state' <<< "$tally")" != "tallied" ]]; then
+          echo "::error::the poll is not tallied"
+          exit 1
+      fi
+      jq -e '.tallies.yes > .tallies.no' <<< "$tally" > /dev/null || { echo "::error::the poll did not pass"; exit 1; }
   env:
       POLL_ID: <64-hex poll id from vote.ochk.io>
 ```

@@ -122,12 +122,13 @@ runs:
                   fail "/api/tally answered $status${code:+ ($code)}${words:+: $words}. $next"
               fi
 
-              # Only a state that is one word is written as an output: a newline in it
-              # would add a line of its own to $GITHUB_OUTPUT.
+              # Only a state from the known set is written as an output: anything else
+              # could carry a newline and add a line of its own to $GITHUB_OUTPUT.
               state=$(jq -r '.state' <<< "$tally")
-              if ! [[ "$state" =~ ^[a-z_]+$ ]]; then
-                  fail "/api/tally answered a state that is not one word: $state"
-              fi
+              case "$state" in
+                  tallied | provisional | awaiting_reveal) ;;
+                  *) fail "/api/tally answered state $state, which this action does not know" ;;
+              esac
               echo "state=$state" >> "$GITHUB_OUTPUT"
               # Re-written by jq on one line, so the body can carry no newline into the file.
               echo "tally-json=$(jq -c . <<< "$tally")" >> "$GITHUB_OUTPUT"
@@ -153,17 +154,21 @@ runs:
                   fail "poll is provisional: an anchored poll's count is not final until the chain is 6 blocks past its close (plus the grace), so the counts may still change${unanchored:+; $unanchored counted ballot(s) have no anchor yet}${because:+; not final because: $because}. Run this job again later."
               fi
 
-              if [[ "$state" != "tallied" ]]; then
-                  echo "passed=false" >> "$GITHUB_OUTPUT"
-                  fail "/api/tally answered state $state, which this action does not pass"
-              fi
-
               if [[ "$REQUIRE_CLOSED" == "true" ]]; then
                   deadline=$(jq -r '.deadline // empty' <<< "$tally")
                   if [[ -n "$deadline" ]]; then
                       now_epoch=$(date +%s)
-                      deadline_epoch=$(date -u -d "$deadline" +%s 2>/dev/null || date -j -f '%Y-%m-%dT%H:%M:%SZ' "$deadline" +%s 2>/dev/null || echo 0)
-                      if [[ "$deadline_epoch" -gt "$now_epoch" ]]; then
+                      # Only an ISO 8601 UTC time goes to date, which would also take a
+                      # parenthesised comment. A deadline it does not read is not taken as past.
+                      deadline_epoch=
+                      if [[ "$deadline" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$ ]]; then
+                          deadline_epoch=$(date -u -d "$deadline" +%s 2>/dev/null || date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$deadline" +%s 2>/dev/null || true)
+                      fi
+                      if ! [[ "$deadline_epoch" =~ ^-?[0-9]+$ ]]; then
+                          echo "passed=false" >> "$GITHUB_OUTPUT"
+                          fail "require-closed=true but the deadline could not be read: $deadline"
+                      fi
+                      if (( deadline_epoch > now_epoch )); then
                           echo "passed=false" >> "$GITHUB_OUTPUT"
                           fail "require-closed=true but deadline $deadline is in the future"
                       fi

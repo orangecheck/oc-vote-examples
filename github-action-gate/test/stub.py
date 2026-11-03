@@ -8,6 +8,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PAST = "2026-01-01T00:00:00Z"
+FUTURE = "2999-01-01T00:00:00Z"
 COUNT = {"turnout": {"voters": 4, "weight": 4}, "tallies": {"yes": 3, "no": 1}, "deadline": PAST}
 
 # Each answer as /api/tally sends it (oc-vote-web src/pages/api/tally.ts).
@@ -54,12 +55,46 @@ ANSWERS = {
         200,
         {"state": "tallied", "turnout": {"voters": "PATH[$(touch gate-pwned)]"}, "tallies": {"yes": 3, "no": 1}},
     ),
+    "voters_named": (
+        200,
+        {"state": "tallied", "turnout": {"voters": "MIN_VOTERS"}, "tallies": {"yes": 3, "no": 1}},
+    ),
+    "inject_poll_id": (
+        404,
+        {"error": "this is the Nostr event id of a poll", "poll_id": "b" * 64 + "\n::warning::x"},
+    ),
+    "inject_unanchored": (
+        200,
+        {"state": "provisional", "basis": "anchored", "unanchored": "1\n::warning::x", **COUNT},
+    ),
+    "future": (200, {"state": "tallied", "basis": "voter_clocks", **COUNT, "deadline": FUTURE}),
+    # GNU date reads a parenthesised comment, newline and all, as a time in the future.
+    "deadline_unread": (200, {"state": "tallied", **COUNT, "deadline": "soon"}),
+    # vote-core 2.2.0 adds this state; the action does not know it yet.
+    "unread": (200, {"state": "unread", "basis": "voter_clocks"}),
+    "inject_deadline": (200, {"state": "tallied", **COUNT, "deadline": FUTURE + " (x\n::warning::y)"}),
+    "inject_reason": (409, {"state": "deferred", "code": "E_SNAPSHOT_UNRESOLVED", "reason": "late\n::warning::x"}),
+    "inject_reason_escaped": (
+        409,
+        {"state": "deferred", "code": "E_SNAPSHOT_UNRESOLVED", "reason": "late%0A::warning::x"},
+    ),
+    "too_many_odd": (429, {"error": "too many tallies asked; try again in a minute"}),
 }
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         case = self.path.split("?")[0].strip("/")
+        if case == "closes_heredoc":
+            # Not JSON.dumps: the newlines inside the note are raw.
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                b'{"state": "tallied", "turnout": {"voters": 4}, "tallies": {"yes": 1, "no": 3},'
+                b' "note": "x\nEND_TALLY\npassed=true\nstate=forged\n"}'
+            )
+            return
         if case in ("not_json", "not_json_inject"):
             self.send_response(502)
             self.send_header("content-type", "text/html")
@@ -72,8 +107,10 @@ class Handler(BaseHTTPRequestHandler):
         status, body = ANSWERS[case]
         self.send_response(status)
         self.send_header("content-type", "application/json")
-        if status == 429:
+        if case == "too_many":
             self.send_header("Retry-After", "42")
+        if case == "too_many_odd":
+            self.send_header("Retry-After", "x[$(touch gate-pwned)]")
         self.end_headers()
         self.wfile.write(json.dumps(body).encode())
 
