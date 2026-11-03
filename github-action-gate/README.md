@@ -54,9 +54,20 @@ jobs:
 
 | Output | Meaning |
 |---|---|
-| `state` | `tallied` or `awaiting_reveal` |
+| `state` | The `state` of a 200 answer: `tallied`, `awaiting_reveal` or `provisional`. Not set when `/api/tally` answers anything else |
 | `passed` | `'true'` / `'false'` |
 | `tally-json` | Full JSON response from `/api/tally` |
+
+### How each answer ends
+
+| `/api/tally` answers | The step |
+|---|---|
+| 200 `tallied` | Applies `require-closed`, `min-voters` and `pass-condition`; passes only if all hold |
+| 200 `awaiting_reveal` (secret poll, no reveal yet) | Passes or fails as `awaiting-reveal-is` says |
+| 200 `provisional` (anchored poll, not final yet) | Fails: "unexpected state: provisional" |
+| 409 `deferred` (snapshot block not buried yet) | Fails at the `curl` call, with no `state` or `passed` output; run it again later |
+| 503 (relays not read in full; no `state`, no count) | Fails at the `curl` call, the same way |
+| 400, 404, 429 or 500 | Fails at the `curl` call, the same way |
 
 ## Verification story
 
