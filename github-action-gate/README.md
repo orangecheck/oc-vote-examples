@@ -66,8 +66,8 @@ jobs:
 | 200 `awaiting_reveal` (secret poll, no reveal yet) | Passes or fails as `awaiting-reveal-is` says |
 | 200 `provisional` (anchored poll, not final yet) | Fails: "unexpected state: provisional" |
 | 409 `deferred` (snapshot block not buried yet) | Fails at the `curl` call, with no `state` or `passed` output; run it again later |
-| 503 (relays not read in full; no `state`, no count) | Fails at the `curl` call, the same way |
-| 400, 404, 429 or 500 | Fails at the `curl` call, the same way |
+| 503 (the relays or the chain not read in full, such as the block at the deadline; no `state`, no count) | Fails at the `curl` call, the same way |
+| 400, 404, 422 (an invalid poll), 429 or 500 | Fails at the `curl` call, the same way |
 
 ## Verification story
 
