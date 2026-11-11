@@ -7,7 +7,8 @@ No build, no install (beyond `npx`). Just patterns for common shell workflows.
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
-POLL=3054390f047f2703186943a41178bc15931500b5139229517f26e56282026ee5
+# A real poll on vote.ochk.io, closed and counted. Use your own id.
+POLL=9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18
 
 tally=$(curl -sSf "https://vote.ochk.io/api/tally?poll=$POLL")
 passed=$(jq -e '.state == "tallied" and (.tallies.yes > .tallies.no)' <<< "$tally")

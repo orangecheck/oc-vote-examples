@@ -91,7 +91,8 @@ independent-verify:
               npx -y @orangecheck/vote-cli tally $POLL_ID --json > tally.json
               jq -e '.tallies.yes > .tallies.no' tally.json
           env:
-              POLL_ID: <64-hex poll id from vote.ochk.io>
+              # A real poll, closed and counted; use your own id.
+              POLL_ID: 9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18
 ```
 
 Two independent implementations agreeing on a tally is the protocol's claim. If the two disagree, the CLI is authoritative and the web page has a bug — file an issue.
@@ -111,5 +112,6 @@ If you don't want the action overhead, drop the logic directly in a step:
       fi
       jq -e '.tallies.yes > .tallies.no' <<< "$tally" > /dev/null || { echo "::error::the poll did not pass"; exit 1; }
   env:
-      POLL_ID: <64-hex poll id from vote.ochk.io>
+      # A real poll, closed and counted; use your own id.
+      POLL_ID: 9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18
 ```
