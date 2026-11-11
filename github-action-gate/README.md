@@ -95,6 +95,8 @@ independent-verify:
               POLL_ID: 9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18
 ```
 
+To count from a signed record you keep, with no relay or tally service asked, see [`offline-tally/`](../offline-tally).
+
 Two independent implementations agreeing on a tally is the protocol's claim. If the two disagree, the CLI is authoritative and the web page has a bug — file an issue.
 
 ## Inline version

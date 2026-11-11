@@ -1,0 +1,24 @@
+{
+    "name": "oc-vote-offline-tally",
+    "private": true,
+    "version": "0.1.0",
+    "description": "Count an OC Vote poll from its signed record with vote-core and bip322, no tally service asked.",
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "scripts": {
+        "tally": "tsx src/cli.ts",
+        "build": "tsc --noEmit",
+        "test": "tsx --test test/offline-tally.test.ts"
+    },
+    "dependencies": {
+        "@orangecheck/bip322": "^1.1.0",
+        "@orangecheck/vote-core": "^2.2.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.10.2",
+        "tsx": "^4.19.2",
+        "typescript": "^5.7.2"
+    }
+}

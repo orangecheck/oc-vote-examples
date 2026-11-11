@@ -1,0 +1,17 @@
+[
+    {
+        "attestation_id": null,
+        "created_at": "2026-04-27T19:36:25Z",
+        "kind": "oc-vote/ballot",
+        "option": "yes",
+        "poll_id": "9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18",
+        "secret": null,
+        "sig": {
+            "alg": "bip322",
+            "pubkey": "bc1pezn5yjxmz9nuahtqprvhfeya2nv4zdfk49u5amquhqptykx695rs60hqa2",
+            "value": "AUC1Zcqd8Gq3hCjIqrrcvg8sTyJI+Ar7IAVtt+s8cF1eOd2vecmG/WTqr+hf3XXrbNqk0IGJnY2jarUqfZwln3Pl"
+        },
+        "v": 0,
+        "voter": "bc1pezn5yjxmz9nuahtqprvhfeya2nv4zdfk49u5amquhqptykx695rs60hqa2"
+    }
+]

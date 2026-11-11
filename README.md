@@ -9,6 +9,7 @@ Copy-forkable integrations of [OC Vote](https://github.com/orangecheck/oc-vote-p
 | [`discord-bot/`](./discord-bot) | A minimal Discord bot that reads tallies and renders them as Discord embeds. Slash commands: `/poll <id>` (one-shot tally), `/poll-watch <id>` (subscribe to periodic updates until deadline). |
 | [`github-action-gate/`](./github-action-gate) | A reusable GitHub Action that gates a job on a poll's tally. Wait for deadline, run the canonical tally function, exit 0 if `yes > no` (configurable), exit 1 otherwise. |
 | [`shell/`](./shell) | One-liner `oc-vote` + `jq` recipes. No build required — just npx. |
+| [`offline-tally/`](./offline-tally) | Count a poll from its signed record with `vote-core` and `bip322`: every signature checked on your machine, no tally service asked. Ships the record of a real poll. |
 
 ## Shared assumptions
 
@@ -20,7 +21,7 @@ Copy-forkable integrations of [OC Vote](https://github.com/orangecheck/oc-vote-p
 
 The point of these templates is to show how thin the integration is. OC Vote's data lives on Nostr; the tally is a pure function; every example here is about three things:
 
-1. Ask `/api/tally` for the result (or run the CLI yourself).
+1. Ask `/api/tally` for the result, or count it yourself: the CLI from the relays, or `offline-tally/` from a signed record.
 2. Render the result in whatever surface you own.
 3. Act on it (grant role, merge PR, send email, allocate funds).
 
