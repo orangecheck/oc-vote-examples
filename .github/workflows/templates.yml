@@ -1,0 +1,47 @@
+name: Templates
+
+# Each Node template as a fork gets it: installed from its own lockfile on
+# Node 22, type-checked, and its tests run where it has any. live.yml does the
+# same every week against the latest published packages.
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: read
+
+concurrency:
+    group: templates-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    template:
+        name: ${{ matrix.template }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                template:
+                    - discord-bot
+                    - offline-tally
+        defaults:
+            run:
+                working-directory: ${{ matrix.template }}
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: '22'
+            - run: yarn install --frozen-lockfile --non-interactive
+            - run: yarn build
+            - name: yarn test, where the template has tests
+              run: |
+                  if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+                      yarn test
+                  else
+                      echo "no test script"
+                  fi

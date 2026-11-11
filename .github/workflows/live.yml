@@ -1,0 +1,88 @@
+name: Live
+
+# Weekly. Each Node template installed with its lockfile removed, so it gets the
+# latest published packages its ranges allow, on current Node: type-checked and
+# tested.
+# Then one real poll counted three ways: oc-vote from the relays, offline-tally
+# from the committed record, and vote.ochk.io's /api/tally. All three must give
+# the same count, and the committed ballot must count. No secrets. GitHub turns
+# a schedule off after 60 days without a commit to the repo; turn it back on
+# under Actions, Live, Enable workflow.
+
+on:
+    schedule:
+        - cron: '47 6 * * 1'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: live
+    cancel-in-progress: false
+
+jobs:
+    template:
+        name: ${{ matrix.template }} on latest
+        if: github.repository == 'orangecheck/oc-vote-examples'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        strategy:
+            fail-fast: false
+            matrix:
+                template:
+                    - discord-bot
+                    - offline-tally
+        defaults:
+            run:
+                working-directory: ${{ matrix.template }}
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: '24'
+            # yarn list reads yarn.lock, so the install writes a fresh one rather than skip it.
+            - run: rm yarn.lock && yarn install --non-interactive
+            - name: The orangecheck versions this run resolved
+              run: yarn -s list --pattern '@orangecheck' --depth=0
+            - run: yarn build
+            - name: yarn test, where the template has tests
+              run: |
+                  if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+                      yarn test
+                  else
+                      echo "no test script"
+                  fi
+
+    live-poll:
+        name: The live poll, counted three ways
+        if: github.repository == 'orangecheck/oc-vote-examples'
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        env:
+            POLL: 9825268c74a3a15baefe8f9705f774cc7bb97205922fc828df3b377e0e158a18
+            BALLOT: 1d10e1e5e108894285d74a11790860444fde0c51d180611006c6204360175164
+        steps:
+            - uses: actions/checkout@v5
+            - uses: actions/setup-node@v5
+              with:
+                  node-version: '24'
+            - name: oc-vote tally, from the relays
+              run: npx -y @orangecheck/vote-cli@latest tally "$POLL" --json > "$RUNNER_TEMP/cli.json"
+            - name: offline-tally, from the committed record
+              working-directory: offline-tally
+              run: |
+                  rm yarn.lock && yarn install --non-interactive
+                  yarn -s list --pattern '@orangecheck' --depth=0 >&2
+                  yarn -s tally "polls/$POLL/poll.json" "polls/$POLL/ballots.json" > "$RUNNER_TEMP/offline.json"
+            - name: vote.ochk.io's /api/tally
+              run: curl -sSf --retry 3 "https://vote.ochk.io/api/tally?poll=$POLL" > "$RUNNER_TEMP/api.json"
+            - name: The three counts agree, and the committed ballot counts
+              run: |
+                  for f in cli offline api; do
+                      jq -S '{state, snapshot_block, turnout, tallies, counted}' "$RUNNER_TEMP/$f.json" > "$RUNNER_TEMP/$f.count"
+                  done
+                  cat "$RUNNER_TEMP/offline.count"
+                  diff "$RUNNER_TEMP/cli.count" "$RUNNER_TEMP/offline.count"
+                  diff "$RUNNER_TEMP/api.count" "$RUNNER_TEMP/offline.count"
+                  jq -e --arg b "$BALLOT" '.state == "tallied" and .counted == [$b] and .rejected == []' "$RUNNER_TEMP/offline.json" > /dev/null
