@@ -6,6 +6,9 @@ on:
     pull_request:
         branches: [main]
 
+permissions:
+    contents: read
+
 jobs:
     home-paths:
         # A path into someone's home directory names a person in a public repo
